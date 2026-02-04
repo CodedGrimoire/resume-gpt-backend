@@ -456,6 +456,145 @@ ${inputText}
   }
 });
 
+// Interview Prep Endpoint
+app.post('/interview-prep', uploadLimiter, async (req, res) => {
+  try {
+    const { targetRole, skills, projects, seniority } = req.body;
+
+    if (!targetRole) {
+      return res.status(400).json({ 
+        error: 'Missing required field',
+        message: 'targetRole is required'
+      });
+    }
+
+    // Build context from provided data
+    const skillsList = Array.isArray(skills) ? skills.join(', ') : (skills || 'Not specified');
+    const projectsList = Array.isArray(projects) 
+      ? projects.map(p => typeof p === 'string' ? p : p.name || p).join(', ')
+      : (projects || 'Not specified');
+
+    const interviewPrepPrompt = `
+You are an expert interview coach preparing a candidate for a ${targetRole} position.
+
+Given the following information:
+- Target Role: ${targetRole}
+- Estimated Seniority: ${seniority || 'Not specified'}
+- Technical Skills: ${skillsList}
+- Projects: ${projectsList}
+
+Generate a comprehensive interview preparation guide. Return ONLY valid JSON (no markdown, no code blocks) with this exact structure:
+
+{
+  "targetRole": "${targetRole}",
+  "seniority": "${seniority || 'Mid-level'}",
+  "difficulty": "Beginner|Intermediate|Advanced",
+  "timeEstimate": "2-3 days",
+  "topicsToPrepare": [
+    {
+      "category": "Technical Skills",
+      "topics": ["topic1", "topic2", "topic3"]
+    },
+    {
+      "category": "System Design",
+      "topics": ["topic1", "topic2"]
+    }
+  ],
+  "hrQuestions": [
+    {
+      "question": "Tell me about yourself",
+      "answer": "Personalized answer based on their background",
+      "keyPoints": ["point1", "point2"],
+      "followUpQuestions": ["follow-up1", "follow-up2"]
+    }
+  ],
+  "technicalQuestions": [
+    {
+      "question": "Technical question relevant to ${targetRole}",
+      "answer": "Detailed technical answer",
+      "keyPoints": ["point1", "point2"],
+      "difficulty": "Intermediate"
+    }
+  ],
+  "projectQuestions": [
+    {
+      "projectName": "Project name from resume",
+      "question": "Question about this specific project",
+      "answer": "Answer referencing their actual work",
+      "keyPoints": ["point1", "point2"]
+    }
+  ],
+  "quickTips": ["tip1", "tip2", "tip3"],
+  "redFlags": ["red flag 1", "red flag 2"]
+}
+
+IMPORTANT:
+- Generate 5-7 HR questions (must include: Tell me about yourself, Why this role, Strengths/weaknesses, Why should we hire you, Biggest challenge, Salary expectation, Where do you see yourself in 5 years)
+- Generate 8-12 technical questions specific to ${targetRole}
+- Generate 3-5 project questions based on: ${projectsList}
+- All answers should be personalized to the candidate's background
+- Keep answers concise but comprehensive (2-3 sentences for key points)
+- Return ONLY the JSON object, no additional text
+`;
+
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert interview coach. Always return valid JSON only, no markdown formatting.'
+          },
+          {
+            role: 'user',
+            content: interviewPrepPrompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`❌ Groq API Error [${response.status}]:`, errText);
+      return res.status(500).json({ error: `Groq API returned ${response.status}: ${errText}` });
+    }
+
+    const result = await response.json();
+    let interviewPrepData;
+
+    try {
+      // Try to parse JSON from response
+      const content = result?.choices?.[0]?.message?.content || '{}';
+      interviewPrepData = JSON.parse(content);
+    } catch (parseError) {
+      console.error('❌ JSON Parse Error:', parseError);
+      return res.status(500).json({ 
+        error: 'Failed to parse interview prep data',
+        message: 'The AI response was not in valid JSON format'
+      });
+    }
+
+    res.json({
+      message: '✅ Interview prep generated successfully',
+      data: interviewPrepData
+    });
+
+  } catch (err) {
+    console.error('❌ Server Error:', err);
+    res.status(500).json({ 
+      error: 'Failed to generate interview prep',
+      message: 'An internal server error occurred. Please try again later.'
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🟢 Server running at http://localhost:${PORT}`);
 });

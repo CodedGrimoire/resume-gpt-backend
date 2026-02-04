@@ -247,7 +247,7 @@ ROLE: <The job or role this resume is best suited for based on experience, skill
 
 SCORE: <Score out of 10 with one decimal place (e.g., 7.5/10). Break down briefly: Formatting (X/2.5), Content (X/3.0), Grammar (X/2.0), Experience (X/1.5), Skills (X/1.0)>
 
-FEEDBACK: <2-3 paragraph general resume feedback covering overall strengths and weaknesses, ATS compatibility, and overall impression>
+FEEDBACK: <1 concise paragraph (3-4 sentences) covering overall strengths, key weaknesses, and overall impression. Be brief and actionable.>
 
 ISSUES: <Specific, actionable issues found. Format as bullet points covering: formatting problems, grammar/spelling errors, content gaps, missing quantifiable metrics, ATS concerns, or clarity issues>
 

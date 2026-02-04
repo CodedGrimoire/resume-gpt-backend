@@ -187,7 +187,18 @@ app.post('/upload', uploadLimiter, upload.single('resume'), async (req, res) => 
 You are a professional resume and career reviewer with expertise in ATS (Applicant Tracking System) optimization and hiring best practices.
 
 Given the resume below (between triple quotes), analyze it using the following comprehensive evaluation criteria and return **all of the following fields**.
-If any field is unclear or unknown, say "Not Available". Follow this exact format strictly:
+If any field is unclear or unknown, say "Not Available". 
+
+**CRITICAL FORMATTING REQUIREMENTS:**
+- Provide each field EXACTLY ONCE - do not repeat any content
+- Use the exact section headers provided below (e.g., "## SCORE:", "## FEEDBACK:")
+- Keep responses concise and well-structured
+- Do NOT duplicate information across different fields
+- Use bullet points (• or -) for lists, not numbered lists
+- Ensure each section is distinct and non-repetitive
+- Do NOT include section headers in the content itself
+
+Follow this exact format strictly:
 
 ## EVALUATION CRITERIA (Use these metrics to score the resume):
 
@@ -290,26 +301,113 @@ ${inputText}
     }
 
     const result = await response.json();
-    const rawText = result?.choices?.[0]?.message?.content || '';
+    let rawText = result?.choices?.[0]?.message?.content || '';
 
-    const extract = (label) => {
-      const pattern = new RegExp(`${label}:\\s*([\\s\\S]*?)(?=\\n[A-Z ]+?:|$)`, 'i');
-      const match = rawText.match(pattern);
-      return match ? match[1].trim() : 'Not found';
+    // Clean and normalize the raw text
+    const cleanText = (text) => {
+      if (!text) return '';
+      
+      // Remove excessive newlines and whitespace
+      text = text.replace(/\r/g, '');
+      text = text.replace(/\n{3,}/g, '\n\n');
+      text = text.replace(/[ \t]+/g, ' ');
+      
+      // Remove duplicate sections (simple heuristic)
+      const lines = text.split('\n');
+      const seen = new Set();
+      const uniqueLines = [];
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        const key = line.substring(0, 60).toLowerCase();
+        
+        // Skip duplicate section headers
+        if (line.match(/^##?\s+[A-Z]/) && seen.has(key)) {
+          continue;
+        }
+        
+        if (line.length > 20) {
+          seen.add(key);
+        }
+        uniqueLines.push(lines[i]);
+      }
+      
+      return uniqueLines.join('\n').trim();
     };
 
+    rawText = cleanText(rawText);
+
+    // Improved extraction function with better pattern matching
+    const extract = (label, alternatives = []) => {
+      const labels = [label, ...alternatives];
+      let bestMatch = null;
+      let bestLength = 0;
+
+      for (const searchLabel of labels) {
+        // Try multiple patterns
+        const patterns = [
+          // Pattern 1: ## Label: content (until next ## or label:)
+          new RegExp(`##?\\s*${searchLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:?\\s*\\n([\\s\\S]*?)(?=\\n##?\\s+[A-Z]|\\n[A-Z][A-Z ]+?:|$)`, 'i'),
+          // Pattern 2: Label: content (without ##)
+          new RegExp(`${searchLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*:?\\s*\\n?([\\s\\S]*?)(?=\\n##?\\s+[A-Z]|\\n[A-Z][A-Z ]+?:|$)`, 'i')
+        ];
+
+        for (const pattern of patterns) {
+          const match = rawText.match(pattern);
+          if (match && match[1]) {
+            let content = match[1].trim();
+            
+            // Remove markdown headers from content
+            content = content.replace(/^##+\s*/gm, '');
+            
+            // Prefer longer, more complete matches
+            if (content.length > bestLength && content.length > 10) {
+              bestMatch = content;
+              bestLength = content.length;
+            }
+          }
+        }
+      }
+
+      if (!bestMatch) return 'Not Available';
+
+      // Clean up the extracted content
+      let cleaned = bestMatch
+        .replace(/\n{3,}/g, '\n\n') // Remove excessive newlines
+        .replace(/^\s+|\s+$/gm, '') // Trim each line
+        .trim();
+
+      // Remove duplicate lines within the content
+      const lines = cleaned.split('\n');
+      const uniqueContent = [];
+      const contentSeen = new Set();
+      
+      for (const line of lines) {
+        const normalized = line.trim().toLowerCase();
+        if (normalized.length > 15 && !contentSeen.has(normalized)) {
+          contentSeen.add(normalized);
+          uniqueContent.push(line.trim());
+        } else if (normalized.length <= 15) {
+          uniqueContent.push(line.trim()); // Keep short lines (likely formatting)
+        }
+      }
+
+      return uniqueContent.join('\n').trim() || 'Not Available';
+    };
+
+    // Extract with alternative label names
     const feedback = {
-      role: extract('ROLE'),
-      score: extract('SCORE'),
-      feedback: extract('FEEDBACK'),
-      issues: extract('ISSUES'),
-      suggestions: extract('SUGGESTIONS'),
-      technicalSkills: extract('TECHNICAL SKILLS REQUIRED'),
-      softSkills: extract('SOFT SKILLS REQUIRED'),
-      projects: extract('PROJECTS THAT IMPRESS RECRUITERS'),
-      marketInsight: extract('JOB MARKET INSIGHT'),
-      learningPaths: extract('LEARNING PATHS AND CERTIFICATIONS'),
-      raw: rawText
+      role: extract('ROLE', ['TARGET JOB ROLE', 'Target Job Role']),
+      score: extract('SCORE', ['Score']),
+      feedback: extract('FEEDBACK', ['General Feedback', 'GENERAL FEEDBACK']),
+      issues: extract('ISSUES', ['Areas for Improvement']),
+      suggestions: extract('SUGGESTIONS', ['Suggested Improvements', 'Suggestions']),
+      technicalSkills: extract('TECHNICAL SKILLS REQUIRED', ['Required Technical Skills', 'Technical Skills', 'TECHNICAL SKILLS']),
+      softSkills: extract('SOFT SKILLS REQUIRED', ['Required Soft Skills', 'Soft Skills', 'SOFT SKILLS']),
+      projects: extract('PROJECTS THAT IMPRESS RECRUITERS', ['Impressive Projects', 'Projects', 'PROJECTS']),
+      marketInsight: extract('JOB MARKET INSIGHT', ['Job Market Insight', 'Market Insight', 'JOB MARKET']),
+      learningPaths: extract('LEARNING PATHS AND CERTIFICATIONS', ['Learning Paths & Certifications', 'Learning Paths', 'Certifications', 'LEARNING PATHS']),
+      raw: rawText // Keep raw for frontend parsing
     };
 
     res.json({
